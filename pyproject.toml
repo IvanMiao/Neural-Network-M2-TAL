@@ -1,0 +1,11 @@
+[project]
+name = "neural-network-m2-tal"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "keras>=3.13.0",
+    "numpy>=2.4.0",
+    "torch>=2.9.1",
+]
