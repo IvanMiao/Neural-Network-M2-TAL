@@ -6,6 +6,9 @@ import torch
 import json
 import numpy as np
 
+# 导入自定义层以确保 Keras 能够反序列化它们
+from train.train import TokenAndPositionEmbedding, TransformerBlock
+
 def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0):
     # 将起始文本转换为 ID
     input_ids = [char2id.get(c, char2id['<UNK>']) for c in start_str]
@@ -20,16 +23,21 @@ def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0):
         
         curr_input = np.array([x])
         
-        # 预测概率
-        preds = model.predict(curr_input, verbose=0)[0][-1]
+        # 预测结果现在是 Logits (未经过 Softmax)，可能包含负数
+        logits = model.predict(curr_input, verbose=0)[0][-1]
         
-        # Temperature Sampling
-        preds = np.log(preds + 1e-10) / temp
-        exp_preds = np.exp(preds)
-        preds = exp_preds / np.sum(exp_preds)
+        # 1. Temperature Scaling (直接除以 temp)
+        logits = logits / temp
         
-        # 随机选择下一个字
-        next_id = np.random.choice(len(preds), p=preds)
+        # 2. 手动实现 Softmax (增加数值稳定性)
+        # 减去最大值防止 exp 溢出
+        exp_preds = np.exp(logits - np.max(logits))
+        probs = exp_preds / np.sum(exp_preds)
+        
+        # 3. 随机选择
+        # 再次归一化以防浮点误差导致和不完全为1
+        probs = probs / np.sum(probs)
+        next_id = np.random.choice(len(probs), p=probs)
         
         generated.append(next_id)
         if next_id == char2id.get('<EOS>', -1):
@@ -39,7 +47,13 @@ def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0):
 
 if __name__ == "__main__":
     # 1. 加载模型
-    model = keras.models.load_model("shiji_transformer.keras")
+    model_path = "best_model.keras" 
+    
+    if not os.path.exists(model_path):
+        model_path = "wenyan_transformer.keras"
+
+    print(f"Loading model from {model_path}...")
+    model = keras.models.load_model(model_path)
     
     # 2. 加载词表
     with open("./data/processed/vocab.json", 'r', encoding='utf-8') as f:
