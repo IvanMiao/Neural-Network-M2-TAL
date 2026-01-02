@@ -15,26 +15,39 @@ seq_len = X.shape[1]
 # 2. Transformer 组件
 @keras.saving.register_keras_serializable()
 class TransformerBlock(keras.layers.Layer):
+    """Pre-LN Transformer Block - 更稳定的训练特性"""
     def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.ff_dim = ff_dim
         self.rate = rate
-        self.att = keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
+        # Attention with dropout
+        self.att = keras.layers.MultiHeadAttention(
+            num_heads=num_heads, 
+            key_dim=embed_dim,
+            dropout=rate  # Attention dropout for regularization
+        )
+        # FFN with dropout between layers
         self.ffn = keras.Sequential([
-            keras.layers.Dense(ff_dim, activation="relu"),
+            keras.layers.Dense(ff_dim, activation="gelu"),  # GELU 通常优于 ReLU
+            keras.layers.Dropout(rate),  # FFN 内部 dropout
             keras.layers.Dense(embed_dim),
         ])
         self.layernorm1 = keras.layers.LayerNormalization(epsilon=1e-6)
         self.layernorm2 = keras.layers.LayerNormalization(epsilon=1e-6)
-        self.dropout = keras.layers.Dropout(rate)
+        self.dropout1 = keras.layers.Dropout(rate)
+        self.dropout2 = keras.layers.Dropout(rate)
 
     def call(self, inputs, training=False):
-        # 使用 use_causal_mask=True 实现 GPT 式单向注意力
-        attn_output = self.att(inputs, inputs, use_causal_mask=True, training=training)
-        out1 = self.layernorm1(inputs + self.dropout(attn_output, training=training))
-        return self.layernorm2(out1 + self.dropout(self.ffn(out1), training=training))
+        # Pre-LN: 先归一化再处理，训练更稳定
+        x = self.layernorm1(inputs)
+        attn_output = self.att(x, x, use_causal_mask=True, training=training)
+        out1 = inputs + self.dropout1(attn_output, training=training)
+        
+        x = self.layernorm2(out1)
+        ffn_output = self.ffn(x, training=training)
+        return out1 + self.dropout2(ffn_output, training=training)
 
     def get_config(self):
         config = super().get_config()
@@ -49,20 +62,25 @@ class TransformerBlock(keras.layers.Layer):
 # 位置编码层，解决 PyTorch 图重用问题
 @keras.saving.register_keras_serializable()
 class TokenAndPositionEmbedding(keras.layers.Layer):
-    def __init__(self, maxlen, vocab_size, embed_dim, **kwargs):
+    """Token + Position Embedding with sqrt(embed_dim) scaling"""
+    def __init__(self, maxlen, vocab_size, embed_dim, dropout_rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.maxlen = maxlen
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
+        self.dropout_rate = dropout_rate
+        self.embed_scale = keras.ops.sqrt(keras.ops.cast(embed_dim, "float32"))
         self.token_emb = keras.layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)
         self.pos_emb = keras.layers.Embedding(input_dim=maxlen, output_dim=embed_dim)
+        self.dropout = keras.layers.Dropout(dropout_rate)
 
-    def call(self, x):
+    def call(self, x, training=False):
         maxlen = keras.ops.shape(x)[-1]
         positions = keras.ops.arange(start=0, stop=maxlen, step=1)
         positions = self.pos_emb(positions)
-        x = self.token_emb(x)
-        return x + positions
+        # Embedding 缩放：防止 embedding 值过小被位置编码淹没
+        x = self.token_emb(x) * self.embed_scale
+        return self.dropout(x + positions, training=training)
 
     def get_config(self):
         config = super().get_config()
@@ -70,17 +88,31 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
             "maxlen": self.maxlen,
             "vocab_size": self.vocab_size,
             "embed_dim": self.embed_dim,
+            "dropout_rate": self.dropout_rate,
         })
         return config
 
-def build_model(vocab_size, seq_len, embed_dim=256, num_heads=8, num_layers=4):
+def build_model(vocab_size, seq_len, embed_dim=256, num_heads=8, num_layers=6, dropout_rate=0.1):
+    """构建 Pre-LN GPT 风格的 Transformer 模型
+    
+    Args:
+        vocab_size: 词表大小
+        seq_len: 序列长度
+        embed_dim: Embedding 维度
+        num_heads: 注意力头数
+        num_layers: Transformer 层数 (增加到 6 层)
+        dropout_rate: Dropout 比率
+    """
     inputs = keras.Input(shape=(seq_len,))
     
-    # 使用自定义层处理 Embedding
-    x = TokenAndPositionEmbedding(seq_len, vocab_size, embed_dim)(inputs)
+    # 使用自定义层处理 Embedding，包含缩放和 Dropout
+    x = TokenAndPositionEmbedding(seq_len, vocab_size, embed_dim, dropout_rate)(inputs)
     
     for _ in range(num_layers):
-        x = TransformerBlock(embed_dim, num_heads, embed_dim * 4)(x)
+        x = TransformerBlock(embed_dim, num_heads, embed_dim * 4, rate=dropout_rate)(x)
+    
+    # Pre-LN 需要最后一层 LayerNorm
+    x = keras.layers.LayerNormalization(epsilon=1e-6)(x)
     
     # 输出层不使用 softmax，在 loss 中设置 from_logits=True 以提高数值稳定性
     outputs = keras.layers.Dense(vocab_size)(x)

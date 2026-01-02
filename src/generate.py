@@ -9,34 +9,49 @@ import numpy as np
 # 导入自定义层以确保 Keras 能够反序列化它们
 from train.train import TokenAndPositionEmbedding, TransformerBlock
 
-def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0):
+def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top_k=50, seq_len=127):
+    """生成文言文本
+    
+    Args:
+        model: 训练好的模型
+        start_str: 起始文本
+        char2id: 字符到ID的映射
+        id2char: ID到字符的映射
+        gen_len: 生成长度
+        temp: 温度参数 (越高越随机，越低越保守)
+        top_k: Top-K 采样参数 (0=禁用，只保留概率最高的K个token)
+        seq_len: 模型序列长度
+    """
     # 将起始文本转换为 ID
     input_ids = [char2id.get(c, char2id['<UNK>']) for c in start_str]
     generated = input_ids[:]
 
     for _ in range(gen_len):
-        # 准备输入，确保长度不超过模型允许的 seq_len (127)
-        x = generated[-127:]
-        if len(x) < 127:
+        # 准备输入，确保长度不超过模型允许的 seq_len
+        x = generated[-(seq_len):]
+        if len(x) < seq_len:
             pad_id = char2id.get('<PAD>', 0)
-            x = [pad_id] * (127 - len(x)) + x
+            x = [pad_id] * (seq_len - len(x)) + x
         
         curr_input = np.array([x])
         
         # 预测结果现在是 Logits (未经过 Softmax)，可能包含负数
         logits = model.predict(curr_input, verbose=0)[0][-1]
         
-        # 1. Temperature Scaling (直接除以 temp)
+        # 1. Temperature Scaling
         logits = logits / temp
         
-        # 2. 手动实现 Softmax (增加数值稳定性)
-        # 减去最大值防止 exp 溢出
+        # 2. Top-K 过滤：只保留概率最高的 K 个 token
+        if top_k > 0 and top_k < len(logits):
+            indices_to_remove = np.argsort(logits)[:-top_k]
+            logits[indices_to_remove] = -float('inf')
+        
+        # 3. 手动实现 Softmax (增加数值稳定性)
         exp_preds = np.exp(logits - np.max(logits))
         probs = exp_preds / np.sum(exp_preds)
         
-        # 3. 随机选择
-        # 再次归一化以防浮点误差导致和不完全为1
-        probs = probs / np.sum(probs)
+        # 4. 随机选择
+        probs = probs / np.sum(probs)  # 再次归一化以防浮点误差
         next_id = np.random.choice(len(probs), p=probs)
         
         generated.append(next_id)
