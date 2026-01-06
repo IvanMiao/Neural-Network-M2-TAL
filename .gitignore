@@ -1,3 +1,5 @@
 .venv/
 
 **/*.keras
+
+.DS_Store
