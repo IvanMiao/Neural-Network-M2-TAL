@@ -4,7 +4,7 @@ import keras
 import torch
 import json
 
-# 1. 加载数据与词表
+# 1. Load data and vocabulary
 data = torch.load("./data/processed/train_data.pt", map_location="cpu") 
 with open("./data/processed/vocab.json", 'r', encoding='utf-8') as f:
     vocab_size = len(json.load(f)['char2id'])
@@ -12,10 +12,10 @@ with open("./data/processed/vocab.json", 'r', encoding='utf-8') as f:
 X, y = data[:, :-1], data[:, 1:]
 seq_len = X.shape[1]
 
-# 2. Transformer 组件
+# 2. Transformer Block
 @keras.saving.register_keras_serializable()
 class TransformerBlock(keras.layers.Layer):
-    """Pre-LN Transformer Block - 更稳定的训练特性"""
+    """Pre-LN Transformer Block - More stable training characteristics"""
     def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.embed_dim = embed_dim
@@ -30,8 +30,8 @@ class TransformerBlock(keras.layers.Layer):
         )
         # FFN with dropout between layers
         self.ffn = keras.Sequential([
-            keras.layers.Dense(ff_dim, activation="gelu"),  # GELU 通常优于 ReLU
-            keras.layers.Dropout(rate),  # FFN 内部 dropout
+            keras.layers.Dense(ff_dim, activation="gelu"),  # [TODO] GELU vs ReLU ?
+            keras.layers.Dropout(rate),  # FFN internal dropout
             keras.layers.Dense(embed_dim),
         ])
         self.layernorm1 = keras.layers.LayerNormalization(epsilon=1e-6)
@@ -40,7 +40,7 @@ class TransformerBlock(keras.layers.Layer):
         self.dropout2 = keras.layers.Dropout(rate)
 
     def call(self, inputs, training=False):
-        # Pre-LN: 先归一化再处理，训练更稳定
+        # Pre-LN: normalization before processing for more stable training
         x = self.layernorm1(inputs)
         attn_output = self.att(x, x, use_causal_mask=True, training=training)
         out1 = inputs + self.dropout1(attn_output, training=training)
@@ -59,7 +59,7 @@ class TransformerBlock(keras.layers.Layer):
         })
         return config
 
-# 位置编码层，解决 PyTorch 图重用问题
+# Positional embedding layer to address issues with PyTorch graph reuse
 @keras.saving.register_keras_serializable()
 class TokenAndPositionEmbedding(keras.layers.Layer):
     """Token + Position Embedding with sqrt(embed_dim) scaling"""
@@ -78,7 +78,7 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
         maxlen = keras.ops.shape(x)[-1]
         positions = keras.ops.arange(start=0, stop=maxlen, step=1)
         positions = self.pos_emb(positions)
-        # Embedding 缩放：防止 embedding 值过小被位置编码淹没
+        # Embedding scaling: prevent embedding values from being overwhelmed by positional embeddings
         x = self.token_emb(x) * self.embed_scale
         return self.dropout(x + positions, training=training)
 
@@ -93,33 +93,33 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
         return config
 
 def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, dropout_rate=0.2):
-    """构建 Pre-LN GPT 风格的 Transformer 模型
+    """Build Pre-LN GPT-style Transformer model
     
     Args:
-        vocab_size: 词表大小
-        seq_len: 序列长度
-        embed_dim: Embedding 维度 (减小以防止过拟合)
-        num_heads: 注意力头数
-        num_layers: Transformer 层数 (减小以防止过拟合)
-        dropout_rate: Dropout 比率 (增加以防止过拟合)
+        vocab_size: Vocabulary size
+        seq_len: Sequence length
+        embed_dim: Embedding dimensions (reduced to prevent overfitting)
+        num_heads: Number of attention heads
+        num_layers: Number of Transformer layers (reduced to prevent overfitting)
+        dropout_rate: Dropout rate (increased to prevent overfitting)
     """
     inputs = keras.Input(shape=(seq_len,))
     
-    # 使用自定义层处理 Embedding，包含缩放和 Dropout
+    # Use custom layers for Embedding, including scaling and Dropout
     x = TokenAndPositionEmbedding(seq_len, vocab_size, embed_dim, dropout_rate)(inputs)
     
     for _ in range(num_layers):
         x = TransformerBlock(embed_dim, num_heads, embed_dim * 4, rate=dropout_rate)(x)
     
-    # Pre-LN 需要最后一层 LayerNorm
+    # Pre-LN requires a final LayerNorm layer
     x = keras.layers.LayerNormalization(epsilon=1e-6)(x)
     
-    # 输出层不使用 softmax，在 loss 中设置 from_logits=True 以提高数值稳定性
+    # Output layer doesn't use softmax; set from_logits=True in loss for better numerical stability
     outputs = keras.layers.Dense(vocab_size)(x)
     return keras.Model(inputs, outputs)
 
 if __name__ == "__main__":
-    # 3. 训练配置
+    # 3. Training configuration
     BATCH_SIZE = 64
     EPOCHS = 10
     MODEL_PATH = "shiji_transformer.keras"
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     ]
 
     print(f"Starting training on {X.shape[0]} samples...")
-    # 增加 shuffle=True 提高训练质量，并添加验证集
+    # Add shuffle=True for better training quality and add validation set
     model.fit(
         X, y,
         batch_size=BATCH_SIZE,
@@ -153,8 +153,8 @@ if __name__ == "__main__":
         validation_split=0.1
     )
 
-    # 训练结束后保存最终模型（可能是 EarlyStopping 恢复的最佳权重，也可能是最后一个 epoch 的权重）
-    # 如果 EarlyStopping 触发且 restore_best_weights=True，这里保存的也是最佳权重
-    # 但为了明确区分，best_model.keras 是训练过程中 val_loss 最低时的快照
+    # Save the final model after training (could be best weights restored from EarlyStopping or weights from the last epoch). 
+    # If EarlyStopping is triggered with restore_best_weights=True, the saved model will have the best weights. 
+    # For clarity, best_model.keras is a snapshot from the epoch with the lowest val_loss during training.
     model.save(MODEL_PATH)
     print(f"Final model saved to {MODEL_PATH}")
