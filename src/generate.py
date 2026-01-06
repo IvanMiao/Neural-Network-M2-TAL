@@ -9,7 +9,7 @@ import numpy as np
 # 导入自定义层以确保 Keras 能够反序列化它们
 from train.train import TokenAndPositionEmbedding, TransformerBlock
 
-def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top_k=50, seq_len=127):
+def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top_k=50, repetition_penalty=1.2, seq_len=511):
     """生成文言文本
     
     Args:
@@ -20,7 +20,8 @@ def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top
         gen_len: 生成长度
         temp: 温度参数 (越高越随机，越低越保守)
         top_k: Top-K 采样参数 (0=禁用，只保留概率最高的K个token)
-        seq_len: 模型序列长度
+        repetition_penalty: 重复惩罚参数 (>1.0 降低重复概率)
+        seq_len: 模型序列长度 (应与训练时的 seq_len 一致)
     """
     # 将起始文本转换为 ID
     input_ids = [char2id.get(c, char2id['<UNK>']) for c in start_str]
@@ -38,6 +39,16 @@ def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top
         # 预测结果现在是 Logits (未经过 Softmax)，可能包含负数
         logits = model.predict(curr_input, verbose=0)[0][-1]
         
+        # 0. Repetition Penalty (重复惩罚)
+        # 对已经生成的 token 进行惩罚
+        if repetition_penalty != 1.0:
+            for token_id in set(generated):
+                if token_id < len(logits):
+                    if logits[token_id] < 0:
+                        logits[token_id] *= repetition_penalty
+                    else:
+                        logits[token_id] /= repetition_penalty
+
         # 1. Temperature Scaling
         logits = logits / temp
         
@@ -81,5 +92,6 @@ if __name__ == "__main__":
     for p in prompts:
         print(f"\n--- Prompt: {p} ---")
         # temp 越高，生成越随机；temp 越低，生成越保守
-        result = generate_text(model, p, char2id, id2char, gen_len=50, temp=0.8)
+        # 增加 repetition_penalty 防止复读
+        result = generate_text(model, p, char2id, id2char, gen_len=50, temp=0.8, repetition_penalty=1.2)
         print(result)

@@ -5,7 +5,7 @@ import torch
 import json
 
 # 1. 加载数据与词表
-data = torch.load("./data/processed/train_data.pt") 
+data = torch.load("./data/processed/train_data.pt", map_location="cpu") 
 with open("./data/processed/vocab.json", 'r', encoding='utf-8') as f:
     vocab_size = len(json.load(f)['char2id'])
 
@@ -92,16 +92,16 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
         })
         return config
 
-def build_model(vocab_size, seq_len, embed_dim=256, num_heads=8, num_layers=6, dropout_rate=0.1):
+def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, dropout_rate=0.2):
     """构建 Pre-LN GPT 风格的 Transformer 模型
     
     Args:
         vocab_size: 词表大小
         seq_len: 序列长度
-        embed_dim: Embedding 维度
+        embed_dim: Embedding 维度 (减小以防止过拟合)
         num_heads: 注意力头数
-        num_layers: Transformer 层数 (增加到 6 层)
-        dropout_rate: Dropout 比率
+        num_layers: Transformer 层数 (减小以防止过拟合)
+        dropout_rate: Dropout 比率 (增加以防止过拟合)
     """
     inputs = keras.Input(shape=(seq_len,))
     

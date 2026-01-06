@@ -35,7 +35,7 @@ def build_vocab(text, vocab_size=8000):
     return char2id, id2char
 
 
-def encode_and_chunk(text, char2id, seq_len=128):
+def encode_and_chunk(text, char2id, seq_len=512):
     # Text to id
     data = [char2id.get(char, char2id['<UNK>']) for char in text]
     
