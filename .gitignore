@@ -2,4 +2,6 @@
 
 **/*.keras
 
-.DS_Store
+**/.DS_Store
+
+data/data_poem/corpus_cleaned_poems
