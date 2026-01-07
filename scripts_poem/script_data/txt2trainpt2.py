@@ -10,19 +10,25 @@ import os
 from collections import Counter
 import torch
 
+# special tokens will be added inside build_vocab
+
 def build_vocab(texts):
     chars = set()
     for t in texts:
         chars.update(t)
     chars = sorted(chars)
-    char2id = {c: i for i, c in enumerate(chars)}
+    # Add standard special tokens at fixed ids: PAD=0, UNK=1, BOS=2, EOS=3
+    tokens = ['<PAD>', '<UNK>', '<BOS>', '<EOS>'] + chars
+    char2id = {c: i for i, c in enumerate(tokens)}
     id2char = {str(i): c for c, i in char2id.items()}
     return char2id, id2char
 
 def texts_to_windows(texts, char2id, L, stride=1):
     windows = []
     for t in texts:
-        ids = [char2id[c] for c in t if c in char2id]
+        # map unknown chars to <UNK> instead of dropping them
+        unk_id = char2id.get('<UNK>', 1)
+        ids = [char2id.get(c, unk_id) for c in t]
         n = len(ids)
         if n < L:
             continue
