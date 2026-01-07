@@ -88,8 +88,10 @@ if __name__ == "__main__":
         id2char = vocab_data['id2char']
 
     # 3. Run experiments
-    prompts = ["黄帝者", "太史公曰", "项羽乃"]
-    for p in prompts:
+    prompts = ["黃帝者", "太史公曰", "項羽乃"]
+    prompts_poetry = ["牀前明月光", "黃河", "何處"]
+    all_prompts = prompts+prompts_poetry
+    for p in all_prompts:
         print(f"\n--- Prompt: {p} ---")
         # Higher temp leads to more random generation; lower temp leads to more conservative generation
         # Increase repetition_penalty to prevent repetition

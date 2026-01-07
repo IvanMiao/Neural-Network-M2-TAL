@@ -144,48 +144,23 @@ if __name__ == "__main__":
     
     # Load Data
     print(f"Loading data from {data_path}...")
-    full_data = torch.load(data_path, map_location="cpu")
-
-    # Train/Val Split (90/10)
-    n_train = int(0.9 * len(full_data))
-    train_data = full_data[:n_train]
-    val_data = full_data[n_train:]
-    print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}")
-
-    # Prepare X, y
-    X_train, y_train = train_data[:, :-1], train_data[:, 1:]
-    X_val, y_val = val_data[:, :-1], val_data[:, 1:]
+    data = torch.load(data_path, map_location="cpu")
     
-    seq_len = X_train.shape[1]
+    X, y = data[:, :-1], data[:, 1:]
+    seq_len = X.shape[1]
 
-    # Build Model (Same architecture)
-    strategy = tf.distribute.MirroredStrategy()
-    print(f"Number of devices: {strategy.num_replicas_in_sync}")
-
-    with strategy.scope():
-        # Using parameters consistent with previous default build_model arguments
-        # explicit values to ensure consistency: embed_dim=128, num_heads=4, num_layers=4
-        model = build_model(
-            vocab_size=vocab_size,
-            seq_len=seq_len,
-            embed_dim=128,
-            num_heads=4,
-            num_layers=4,
-            dropout_rate=0.2
-        )
-        
-        optimizer = keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01)
-        
-        loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-        
-        model.compile(optimizer=optimizer, loss=loss_fn, metrics=["accuracy"])
-
-    model.summary()
+    # Build Model
+    model = build_model(vocab_size, seq_len)
+    model.compile(
+        optimizer=keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01),
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        metrics=["accuracy"]
+    )
 
     # Callbacks
     callbacks = [
         keras.callbacks.ModelCheckpoint(
-            filepath=model_save_name,
+            filepath="best_model.keras",
             save_best_only=True,
             monitor="val_loss",
             verbose=1
@@ -194,14 +169,17 @@ if __name__ == "__main__":
         keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
     ]
 
-    # Train
+    print(f"Starting training on {X.shape[0]} samples...")
+    # Add shuffle=True for better training quality and add validation set
     model.fit(
-        X_train.numpy(), y_train.numpy(),
+        X, y,
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
         callbacks=callbacks,
         shuffle=True,
-        validation_data=(X_val.numpy(), y_val.numpy())
+        validation_split=0.1
     )
-    
-    print(f"Training finished. Best model saved to {model_save_name}")
+
+    # Save the final model after training
+    model.save(model_save_name)
+    print(f"Final model saved to {model_save_name}")
