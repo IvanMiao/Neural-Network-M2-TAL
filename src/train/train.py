@@ -4,13 +4,7 @@ import keras
 import torch
 import json
 
-# 1. Load data and vocabulary
-data = torch.load("./data/processed/train_data.pt", map_location="cpu") 
-with open("./data/processed/vocab.json", 'r', encoding='utf-8') as f:
-    vocab_size = len(json.load(f)['char2id'])
-
-X, y = data[:, :-1], data[:, 1:]
-seq_len = X.shape[1]
+# 1. Load data and vocabulary -> Moved to __main__ to support dual-stream config
 
 # 2. Transformer Block
 @keras.saving.register_keras_serializable()
@@ -119,21 +113,79 @@ def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, d
     return keras.Model(inputs, outputs)
 
 if __name__ == "__main__":
-    # 3. Training configuration
+    # ================= CONFIGURATION =================
+    # Choose mode: "prose" or "poetry"
+    TRAIN_MODE = "prose" 
+    
     BATCH_SIZE = 64
-    EPOCHS = 10
-    MODEL_PATH = "shiji_transformer.keras"
+    EPOCHS = 30
+    # =================================================
 
-    model = build_model(vocab_size, seq_len)
-    model.compile(
-        optimizer=keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01),
-        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=["accuracy"]
-    )
+    print(f"=== Starting training in [{TRAIN_MODE}] mode ===")
+    
+    # Setup paths based on mode
+    if TRAIN_MODE == "prose":
+        data_path = "./data/processed/train_prose.pt"
+        model_save_name = "prose_model.keras"
+    elif TRAIN_MODE == "poetry":
+        data_path = "./data/processed/train_poetry.pt"
+        model_save_name = "poetry_model.keras"
+    else:
+        raise ValueError(f"Unknown TRAIN_MODE: {TRAIN_MODE}")
 
+    # Load Vocab (Shared)
+    vocab_path = "./data/processed/vocab.json"
+    
+    with open(vocab_path, 'r', encoding='utf-8') as f:
+        vocab = json.load(f)
+        char2id = vocab["char2id"]
+        vocab_size = len(char2id)
+        print(f"Vocab size: {vocab_size}")
+    
+    # Load Data
+    print(f"Loading data from {data_path}...")
+    full_data = torch.load(data_path, map_location="cpu")
+
+    # Train/Val Split (90/10)
+    n_train = int(0.9 * len(full_data))
+    train_data = full_data[:n_train]
+    val_data = full_data[n_train:]
+    print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}")
+
+    # Prepare X, y
+    X_train, y_train = train_data[:, :-1], train_data[:, 1:]
+    X_val, y_val = val_data[:, :-1], val_data[:, 1:]
+    
+    seq_len = X_train.shape[1]
+
+    # Build Model (Same architecture)
+    strategy = tf.distribute.MirroredStrategy()
+    print(f"Number of devices: {strategy.num_replicas_in_sync}")
+
+    with strategy.scope():
+        # Using parameters consistent with previous default build_model arguments
+        # explicit values to ensure consistency: embed_dim=128, num_heads=4, num_layers=4
+        model = build_model(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            embed_dim=128,
+            num_heads=4,
+            num_layers=4,
+            dropout_rate=0.2
+        )
+        
+        optimizer = keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01)
+        
+        loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        
+        model.compile(optimizer=optimizer, loss=loss_fn, metrics=["accuracy"])
+
+    model.summary()
+
+    # Callbacks
     callbacks = [
         keras.callbacks.ModelCheckpoint(
-            filepath="best_model.keras",
+            filepath=model_save_name,
             save_best_only=True,
             monitor="val_loss",
             verbose=1
@@ -142,19 +194,14 @@ if __name__ == "__main__":
         keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
     ]
 
-    print(f"Starting training on {X.shape[0]} samples...")
-    # Add shuffle=True for better training quality and add validation set
+    # Train
     model.fit(
-        X, y,
+        X_train.numpy(), y_train.numpy(),
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
         callbacks=callbacks,
         shuffle=True,
-        validation_split=0.1
+        validation_data=(X_val.numpy(), y_val.numpy())
     )
-
-    # Save the final model after training (could be best weights restored from EarlyStopping or weights from the last epoch). 
-    # If EarlyStopping is triggered with restore_best_weights=True, the saved model will have the best weights. 
-    # For clarity, best_model.keras is a snapshot from the epoch with the lowest val_loss during training.
-    model.save(MODEL_PATH)
-    print(f"Final model saved to {MODEL_PATH}")
+    
+    print(f"Training finished. Best model saved to {model_save_name}")

@@ -52,32 +52,43 @@ def encode_and_chunk(text, char2id, seq_len=512):
     return torch.tensor(chunks, dtype=torch.long)
 
 if __name__ == "__main__":
-    # Use glob to find all cleaned text files
-    raw_data_paths = glob.glob("./data/processed/*_cleaned.txt")
-    if not raw_data_paths:
-        print("No cleaned data files found in ./data/processed/")
-        exit(1)
-        
+    # Define paths
+    prose_paths = glob.glob("./data/data_prose/processed/*_cleaned.txt")
+    poetry_paths = ["./data/data_poem/poems_further_cleaned.txt"]
+    
     save_dir = "./data/processed"
     os.makedirs(save_dir, exist_ok=True)
 
-    print(f"Found files: {raw_data_paths}")
-    print("Cleaning data...")
-    text = clean_data(raw_data_paths)
-    print(f"Total cleaned text length: {len(text)} characters")
+    print("Cleaning Prose data...")
+    prose_text = clean_data(prose_paths)
+    print(f"Prose length: {len(prose_text)} chars")
+
+    print("Cleaning Poetry data...")
+    poetry_text = clean_data(poetry_paths)
+    print(f"Poetry length: {len(poetry_text)} chars")
     
-    print("Building vocab...")
-    char2id, id2char = build_vocab(text)
+    full_text = prose_text + poetry_text
+    print(f"Total combined length: {len(full_text)} chars")
+
+    print("Building unified vocab...")
+    char2id, id2char = build_vocab(full_text)
     
-    print("Encoding text...")
-    dataset = encode_and_chunk(text, char2id)
-    
-    # Save data
-    if dataset.numel() > 0:
-        torch.save(dataset, os.path.join(save_dir, "train_data.pt"))
-        with open(os.path.join(save_dir, "vocab.json"), 'w', encoding='utf-8') as f:
-            json.dump({"char2id": char2id, "id2char": id2char}, f, ensure_ascii=False)
-        
-        print(f"Preprocessing finished. Dataset shape: {dataset.shape}")
+    # Save vocab
+    with open(os.path.join(save_dir, "vocab.json"), 'w', encoding='utf-8') as f:
+        json.dump({"char2id": char2id, "id2char": id2char}, f, ensure_ascii=False)
+
+    print("Encoding Prose dataset...")
+    prose_dataset = encode_and_chunk(prose_text, char2id)
+    if prose_dataset.numel() > 0:
+        torch.save(prose_dataset, os.path.join(save_dir, "train_prose.pt"))
+        print(f"Saved train_prose.pt: {prose_dataset.shape}")
     else:
-        print("Preprocessing failed: Empty dataset.")
+        print("Warning: Prose dataset is empty")
+
+    print("Encoding Poetry dataset...")
+    poetry_dataset = encode_and_chunk(poetry_text, char2id)
+    if poetry_dataset.numel() > 0:
+        torch.save(poetry_dataset, os.path.join(save_dir, "train_poetry.pt"))
+        print(f"Saved train_poetry.pt: {poetry_dataset.shape}")
+    else:
+        print("Warning: Poetry dataset is empty")
