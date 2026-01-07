@@ -4,7 +4,6 @@ import keras
 import torch
 import json
 
-# 1. Load data and vocabulary -> Moved to __main__ to support dual-stream config
 
 # 2. Transformer Block
 @keras.saving.register_keras_serializable()
@@ -86,7 +85,7 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
         })
         return config
 
-def build_xy_from_seqs(seqs, max_len=210, pad_id=0, bos_id=1, eos_id=2):
+def build_xy_from_seqs(seqs, max_len=210, pad_id=0, bos_id=1, eos_id=2, eos_weight=2.0):
     kept = []
     for s in seqs:
         s2 = [bos_id] + list(s) + [eos_id]
@@ -99,27 +98,31 @@ def build_xy_from_seqs(seqs, max_len=210, pad_id=0, bos_id=1, eos_id=2):
         data[i, :len(s)] = torch.tensor(s, dtype=torch.long)
     X = data[:, :-1]
     y = data[:, 1:]
-    return X, y
+    w = (y != pad_id).to(torch.float32)
+    if eos_weight is not None and eos_weight != 1.0:
+        w = w * torch.where(
+            y == eos_id,
+            torch.tensor(eos_weight, dtype=torch.float32),
+            torch.tensor(1.0, dtype=torch.float32),
+        )
+    return X, y, w
 
 def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, dropout_rate=0.2):
     """Build Pre-LN GPT-style Transformer model
-    
+
     Args:
         vocab_size: Vocabulary size
         seq_len: Sequence length
-        embed_dim: Embedding dimensions (overfitting -> reduce it )
+        embed_dim: Embedding dimensions (reduced to prevent overfitting)
         num_heads: Number of attention heads
-        num_layers: Number of Transformer layers (overfitting -> reduce it)
-        dropout_rate: Dropout rate (overfitting -> augment it)
+        num_layers: Number of Transformer layers (reduced to prevent overfitting)
+        dropout_rate: Dropout rate (increased to prevent overfitting)
     """
     inputs = keras.Input(shape=(seq_len,))
-    
-    # Use custom layers for Embedding, including scaling and Dropout
     x = TokenAndPositionEmbedding(seq_len, vocab_size, embed_dim, dropout_rate)(inputs)
-    
+
     for _ in range(num_layers):
         x = TransformerBlock(embed_dim, num_heads, embed_dim * 4, rate=dropout_rate)(x)
-    
     # Pre-LN requires a final LayerNorm layer
     x = keras.layers.LayerNormalization(epsilon=1e-6)(x)
     
@@ -128,69 +131,43 @@ def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, d
     return keras.Model(inputs, outputs)
 
 if __name__ == "__main__":
-    # ================= CONFIGURATION =================
-    # Choose mode: "prose" or "poetry"
-    TRAIN_MODE = "prose" 
-    
+    # 3. Training configuration
     BATCH_SIZE = 64
-    EPOCHS = 30
-    # =================================================
+    EPOCHS = 5
+    MODEL_PATH = "poem_transformer.keras"
 
-    print(f"=== Starting training in [{TRAIN_MODE}] mode ===")
-    
-    # Setup paths based on mode
-    if TRAIN_MODE == "prose":
-        data_path = "./data/processed/train_prose.pt"
-        model_save_name = "prose_model.keras"
-    elif TRAIN_MODE == "poetry":
-        data_path = "./data/processed/train_poetry.pt"
-        model_save_name = "poetry_model.keras"
-    else:
-        raise ValueError(f"Unknown TRAIN_MODE: {TRAIN_MODE}")
-
-    # Load Vocab (Shared)
-    vocab_path = "./data/processed/vocab.json"
-    
-    with open(vocab_path, 'r', encoding='utf-8') as f:
+    with open("./data/processed/vocab.json", "r", encoding="utf-8") as f:
         vocab = json.load(f)
+        vocab_size = len(vocab["char2id"])
         char2id = vocab["char2id"]
-        vocab_size = len(char2id)
-        print(f"Vocab size: {vocab_size}")
-    
+    seqs = torch.load("./data/processed/train_data.pt")
+    max_len = 210
     pad_id = char2id.get('<PAD>', 0)
     bos_id = char2id.get('<BOS>', 1)
     eos_id = char2id.get('<EOS>', 2)
-    max_len = 210  # Default max length for poetry
 
-    # Load Data
-    print(f"Loading data from {data_path}...")
-    data = torch.load(data_path, map_location="cpu")
-    
-    # Check if data is a Tensor and has sufficient length to be considered "pre-windowed"
-    # Matches logic in train_poem.py to differentiate between sliding window tensors and raw sequences
-    if hasattr(data, 'ndim') and data.ndim == 2 and data.shape[1] > (max_len - 2):
-        print("Detected fixed-window dataset. Using simple slicing.")
-        X, y = data[:, :-1], data[:, 1:]
+    # txt2trainpt: windows length = seq_len + 1
+    if hasattr(seqs, 'ndim') and seqs.ndim == 2 and seqs.shape[1] > (max_len - 2):
+        print("Detected fixed-window dataset (likely from txt2trainpt). Using sliding-window X/y from data file.")
+        X = seqs[:, :-1]
+        y = seqs[:, 1:]
+        seq_len = X.shape[1]
+        w = (y != pad_id).to(torch.float32)
     else:
-        print("Detected variable-length sequences or short windows. Building X,y via build_xy_from_seqs().")
-        # Ensure data is a list of lists or similar iterable
-        # If data is a tensor, iterating it yields rows, which works for build_xy_from_seqs
-        X, y = build_xy_from_seqs(data, max_len=max_len, pad_id=pad_id, bos_id=bos_id, eos_id=eos_id)
-        
-    seq_len = X.shape[1]
+        print("Detected variable-length sequences (likely from prepare_trainset). Building X,y via build_xy_from_seqs().")
+        X, y, w = build_xy_from_seqs(seqs, max_len=max_len, pad_id=pad_id, bos_id=bos_id, eos_id=eos_id, eos_weight=2.0)
+        seq_len = X.shape[1]
 
-    # Build Model
-    model = build_model(vocab_size, seq_len)
+    model = build_model(vocab_size=vocab_size, seq_len=seq_len)
     model.compile(
         optimizer=keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01),
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         metrics=["accuracy"]
     )
 
-    # Callbacks
     callbacks = [
         keras.callbacks.ModelCheckpoint(
-            filepath="best_model.keras",
+            filepath="poem_best_model.keras",
             save_best_only=True,
             monitor="val_loss",
             verbose=1
@@ -209,7 +186,8 @@ if __name__ == "__main__":
         shuffle=True,
         validation_split=0.1
     )
-
-    # Save the final model after training
-    model.save(model_save_name)
-    print(f"Final model saved to {model_save_name}")
+    # Save the final model after training (could be best weights restored from EarlyStopping or weights from the last epoch). 
+    # If EarlyStopping is triggered with restore_best_weights=True, the saved model will have the best weights. 
+    # For clarity, best_model.keras is a snapshot from the epoch with the lowest val_loss during training.
+    model.save(MODEL_PATH)
+    print(f"Final model saved to {MODEL_PATH}")
