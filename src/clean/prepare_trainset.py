@@ -54,7 +54,7 @@ def encode_and_chunk(text, char2id, seq_len=512):
 if __name__ == "__main__":
     # Define paths
     prose_paths = glob.glob("./data/data_prose/processed/*_cleaned.txt")
-    poetry_paths = ["./data/data_poem/poems_further_cleaned.txt"]
+    poetry_paths = ["./data/data_poem/poems_all_cleaned.txt"]
     
     save_dir = "./data/processed"
     os.makedirs(save_dir, exist_ok=True)
