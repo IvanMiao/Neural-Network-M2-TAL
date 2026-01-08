@@ -4,6 +4,8 @@ import keras
 import torch
 import json
 
+from eval_callback import TrainingReportCallback
+
 # 1. Load data and vocabulary -> Moved to __main__ to support dual-stream config
 
 # 2. Transformer Block
@@ -86,7 +88,7 @@ class TokenAndPositionEmbedding(keras.layers.Layer):
         })
         return config
 
-def build_xy_from_seqs(seqs, max_len=210, pad_id=0, bos_id=1, eos_id=2):
+def build_xy_from_seqs(seqs, max_len=256, pad_id=0, bos_id=1, eos_id=2):
     kept = []
     for s in seqs:
         s2 = [bos_id] + list(s) + [eos_id]
@@ -100,6 +102,30 @@ def build_xy_from_seqs(seqs, max_len=210, pad_id=0, bos_id=1, eos_id=2):
     X = data[:, :-1]
     y = data[:, 1:]
     return X, y
+
+@keras.saving.register_keras_serializable()
+class Perplexity(keras.metrics.Metric):
+    def __init__(self, name='perplexity', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.acc_loss = self.add_weight(name="acc_loss", initializer="zeros")
+        self.count = self.add_weight(name="count", initializer="zeros")
+        self.loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction="none")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        losses = self.loss_fn(y_true, y_pred)
+        # 创建 mask：忽略 PAD token (PAD id = 0)
+        mask = keras.ops.cast(y_true != 0, "float32")
+        # 只计算非 PAD token 的 loss
+        masked_losses = losses * mask
+        self.acc_loss.assign_add(keras.ops.sum(masked_losses))
+        self.count.assign_add(keras.ops.sum(mask))
+
+    def result(self):
+        return keras.ops.exp(self.acc_loss / (self.count + 1e-6))
+
+    def reset_state(self):
+        self.acc_loss.assign(0.0)
+        self.count.assign(0.0)
 
 def build_model(vocab_size, seq_len, embed_dim=128, num_heads=4, num_layers=4, dropout_rate=0.2):
     """Build Pre-LN GPT-style Transformer model
@@ -160,7 +186,7 @@ if __name__ == "__main__":
     pad_id = char2id.get('<PAD>', 0)
     bos_id = char2id.get('<BOS>', 1)
     eos_id = char2id.get('<EOS>', 2)
-    max_len = 210  # Default max length for poetry
+    max_len = 512
 
     # Load Data
     print(f"Loading data from {data_path}...")
@@ -184,7 +210,7 @@ if __name__ == "__main__":
     model.compile(
         optimizer=keras.optimizers.AdamW(learning_rate=5e-4, weight_decay=0.01),
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=["accuracy"]
+        metrics=["accuracy", Perplexity()]
     )
 
     # Callbacks
@@ -196,7 +222,8 @@ if __name__ == "__main__":
             verbose=1
         ),
         keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, verbose=1),
-        keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
+        keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1),
+        TrainingReportCallback(output_dir="./reports", model_name=TRAIN_MODE)
     ]
 
     print(f"Starting training on {X.shape[0]} samples...")
