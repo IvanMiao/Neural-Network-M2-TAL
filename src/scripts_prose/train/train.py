@@ -26,7 +26,7 @@ class TransformerBlock(keras.layers.Layer):
         )
         # FFN with dropout between layers
         self.ffn = keras.Sequential([
-            keras.layers.Dense(ff_dim, activation="gelu"),  # [TODO] GELU vs ReLU ?
+            keras.layers.Dense(ff_dim, activation="gelu"),
             keras.layers.Dropout(rate),  # FFN internal dropout
             keras.layers.Dense(embed_dim),
         ])
@@ -113,9 +113,9 @@ class Perplexity(keras.metrics.Metric):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         losses = self.loss_fn(y_true, y_pred)
-        # 创建 mask：忽略 PAD token (PAD id = 0)
+        # Create a mask: ignore PAD tokens (PAD id = 0)
         mask = keras.ops.cast(y_true != 0, "float32")
-        # 只计算非 PAD token 的 loss
+        # Compute loss only for non-PAD tokens
         masked_losses = losses * mask
         self.acc_loss.assign_add(keras.ops.sum(masked_losses))
         self.count.assign_add(keras.ops.sum(mask))

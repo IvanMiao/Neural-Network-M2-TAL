@@ -181,7 +181,7 @@ if __name__ == "__main__":
     MAX_LEN = 20
     # =================================================
 
-    print(f"=== Starting CLASSIFIER training (Prompt Simulation Mode) ===")
+    print(f"=== Starting CLASSIFIER training ===")
     
     # Setup paths
     prose_path = "./data/processed/train_prose.pt"

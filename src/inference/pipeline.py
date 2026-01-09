@@ -77,11 +77,11 @@ def generate_text_pipeline(classifier, prose_model, poetry_model, prompt, char2i
     if style_id == 1: # Poetry
         gen_len = 100
         temp = 0.9
-        rep_penalty = 1.3
+        rep_penalty = 1.8
     else: # Prose
         gen_len = 200
         temp = 0.8
-        rep_penalty = 1.1 
+        rep_penalty = 1.5
     
     print(f"  -> Generating {style_name}...")
     

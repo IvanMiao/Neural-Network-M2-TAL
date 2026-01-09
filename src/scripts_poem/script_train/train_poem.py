@@ -177,7 +177,7 @@ if __name__ == "__main__":
     ]
 
     print(f"Starting training on {X.shape[0]} samples...")
-    # Add shuffle=True for better training quality and add validation set
+
     model.fit(
         X, y,
         batch_size=BATCH_SIZE,
@@ -186,8 +186,6 @@ if __name__ == "__main__":
         shuffle=True,
         validation_split=0.1
     )
-    # Save the final model after training (could be best weights restored from EarlyStopping or weights from the last epoch). 
-    # If EarlyStopping is triggered with restore_best_weights=True, the saved model will have the best weights. 
-    # For clarity, best_model.keras is a snapshot from the epoch with the lowest val_loss during training.
+
     model.save(MODEL_PATH)
     print(f"Final model saved to {MODEL_PATH}")

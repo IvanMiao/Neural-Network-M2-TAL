@@ -1,4 +1,3 @@
-
 import os
 os.environ["KERAS_BACKEND"] = "torch"
 import keras
@@ -8,7 +7,6 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 class TrainingReportCallback(keras.callbacks.Callback):
-    """训练结束后生成完整报告：JSON历史、PNG图表、Markdown报告"""
     
     def __init__(self, output_dir="./reports", model_name="model"):
         super().__init__()
@@ -21,7 +19,7 @@ class TrainingReportCallback(keras.callbacks.Callback):
         for key, value in logs.items():
             if key not in self.history:
                 self.history[key] = []
-            # 转换为 Python float 以便 JSON 序列化
+
             self.history[key].append(float(value))
     
     def on_train_end(self, logs=None):
@@ -29,25 +27,20 @@ class TrainingReportCallback(keras.callbacks.Callback):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name = f"{self.model_name}_{timestamp}"
         
-        # 1. 保存 JSON 历史
         json_path = os.path.join(self.output_dir, f"{base_name}_history.json")
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(self.history, f, indent=2, ensure_ascii=False)
         print(f"Training history saved to {json_path}")
         
-        # 2. 生成图表
         self._plot_metrics(base_name)
         
-        # 3. 生成 Markdown 报告
         self._generate_report(base_name)
     
     def _plot_metrics(self, base_name):
-        """生成训练指标图表"""
         epochs = range(1, len(self.history.get('loss', [])) + 1)
         if not epochs:
             return
             
-        # 设置中文字体和风格
         plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
         plt.rcParams['axes.unicode_minus'] = False
         
@@ -89,7 +82,7 @@ class TrainingReportCallback(keras.callbacks.Callback):
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Learning Rate (if available)
+        # Learning Rate
         ax = axes[1, 1]
         if 'learning_rate' in self.history or 'lr' in self.history:
             lr_key = 'learning_rate' if 'learning_rate' in self.history else 'lr'
@@ -99,7 +92,6 @@ class TrainingReportCallback(keras.callbacks.Callback):
             ax.set_title('Learning Rate')
             ax.grid(True, alpha=0.3)
         else:
-            # 显示训练/验证 loss 对比
             ax.plot(epochs, self.history['loss'], 'b-', label='Train', linewidth=2)
             if 'val_loss' in self.history:
                 ax.plot(epochs, self.history['val_loss'], 'r--', label='Val', linewidth=2)
@@ -116,10 +108,8 @@ class TrainingReportCallback(keras.callbacks.Callback):
         print(f"Training charts saved to {chart_path}")
     
     def _generate_report(self, base_name):
-        """生成 Markdown 报告"""
         report_path = os.path.join(self.output_dir, f"{base_name}_report.md")
         
-        # 获取最终指标
         final_loss = self.history.get('loss', [0])[-1]
         final_val_loss = self.history.get('val_loss', [0])[-1]
         final_acc = self.history.get('accuracy', [0])[-1]

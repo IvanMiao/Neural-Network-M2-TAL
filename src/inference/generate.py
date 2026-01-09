@@ -97,7 +97,7 @@ if __name__ == "__main__":
         id2char = vocab_data['id2char']
 
     # 3. Run experiments
-    prompts = ["习者", "太史公曰", "項羽乃"]
+    prompts = ["昔者", "太史公曰", "項羽乃"]
     prompts_poetry = ["大漠孤煙", "何處"]
     all_prompts = prompts+prompts_poetry
     for p in all_prompts:
