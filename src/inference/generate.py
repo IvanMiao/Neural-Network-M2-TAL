@@ -102,7 +102,6 @@ if __name__ == "__main__":
     all_prompts = prompts+prompts_poetry
     for p in all_prompts:
         print(f"\n--- Prompt: {p} ---")
-        # Higher temp leads to more random generation; lower temp leads to more conservative generation
         # Increase repetition_penalty to prevent repetition
         result = generate_text(model, p, char2id, id2char, gen_len=50, temp=0.8, repetition_penalty=1.2)
         print(result)
