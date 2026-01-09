@@ -1,7 +1,6 @@
 import os
 os.environ["KERAS_BACKEND"] = "torch"
 import keras
-import torch
 import json
 import numpy as np
 import sys
@@ -17,11 +16,11 @@ if src_dir not in sys.path:
     sys.path.append(src_dir)
 
 # Import custom layers from train modules/scripts
-from src.train.train import TokenAndPositionEmbedding
-from src.train.train import TransformerBlock as GeneratorBlock
-from src.train.train_classifier import TransformerBlock as ClassifierBlock
+from src.scripts_prose.train.train import TokenAndPositionEmbedding
+from src.scripts_prose.train.train import TransformerBlock as GeneratorBlock
+from src.scripts_prose.train.train_classifier import TransformerBlock as ClassifierBlock
 # Import generation logic
-from src.generate import generate_text
+from src.inference.generate import generate_text
 
 def load_classifier(model_path):
     print(f"Loading classifier from {model_path}...")

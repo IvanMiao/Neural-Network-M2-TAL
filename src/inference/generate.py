@@ -1,13 +1,22 @@
 import os
 os.environ["KERAS_BACKEND"] = "torch"
-
 import keras
-import torch
 import json
 import numpy as np
+import sys
+
+# Add project root to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '../../'))
+src_dir = os.path.join(project_root, 'src')
+
+if project_root not in sys.path:
+    sys.path.append(project_root)
+if src_dir not in sys.path:
+    sys.path.append(src_dir)
 
 # Import custom layers to ensure Keras can deserialize them
-from train.train import TokenAndPositionEmbedding, TransformerBlock
+from src.scripts_prose.train.train import TokenAndPositionEmbedding, TransformerBlock
 
 def generate_text(model, start_str, char2id, id2char, gen_len=100, temp=1.0, top_k=50, repetition_penalty=1.2, seq_len=511):
     """Generate Classical Chinese text
@@ -88,8 +97,8 @@ if __name__ == "__main__":
         id2char = vocab_data['id2char']
 
     # 3. Run experiments
-    prompts = ["黃帝者", "太史公曰", "項羽乃"]
-    prompts_poetry = ["牀前明月光", "黃河", "何處"]
+    prompts = ["习者", "太史公曰", "項羽乃"]
+    prompts_poetry = ["大漠孤煙", "何處"]
     all_prompts = prompts+prompts_poetry
     for p in all_prompts:
         print(f"\n--- Prompt: {p} ---")
